@@ -1,0 +1,176 @@
+<!-- 
+# Configuration file for libinput-gestures.
+#
+# The default configuration file exists at /etc/libinput-gestures.conf
+# but a user can create a personal custom configuration file at
+# ~/.config/libinput-gestures.conf.
+#
+# Currently "application", "gesture", "command" and "device" configuration tags are supported as
+# described below.
+# Each gesture tag has 2-4 attributes:
+#
+# type, motion, [fingers] and [description]
+#
+# where type and motion is either:
+#     swipe up|down|left|right|left_up|right_up|left_down|right_down
+#     pinch in|out|clockwise|anticlockwise
+#	  pointer tap|double_tap|triple_tap|quadruple_tap
+#
+# command is the child tag of the gesture and is any valid shell command + arguments.
+#
+# fingers is a single numeric digit and is optional (and is
+# typically 3 or 4). If specified then the command is executed when
+# exactly that number of fingers is used in the gesture. If not
+# specified then the command is executed when that gesture is executed
+# with any number of fingers. Gesture lines specified with finger_count
+# have priority over the same gesture specified without any
+# finger_count.
+#
+# Typically command will be xdotool, or wmctrl. See "man xdotool" for
+# the many things you can action with that tool. Note that unfortunately
+# xdotool does not work with native Wayland clients.
+-->
+
+<libinput>
+	<application>
+		<gesture 
+			type = "swipe"
+			motion = "left"
+			fingers = "3"
+		>
+			<command>xdotool key alt+Tab</command>
+		</gesture>
+		<gesture 
+			type = "swipe"
+			motion = "right"
+			fingers = "3"
+		>
+			<command>xdotool key alt+Tab+shift</command>
+		</gesture>
+		<gesture
+			type = "pinch"
+			motion = "in"
+			description = "Show Desktop"
+		>
+			<command>xdotool key ctrl+F12</command>
+		</gesture>
+		<gesture
+			type = "pinch"
+			motion = "out"
+			description = "Toggle fullscreen"
+		>
+			<command>xdotool key F11</command>
+		</gesture>
+		<gesture
+			type = "swipe"
+			motion = "down"
+			fingers = "3"
+		>
+			<command>xdotool key ctrl+F7</command>
+		</gesture>
+		<gesture
+			type = "swipe"
+			motion = "up"
+			fingers = "3"
+			description = "KDE: Present windows (current application)"
+		>
+			<command>xdotool key ctrl+F9</command>
+		</gesture>
+		<gesture
+			type = "pointer"
+			motion = "double_tap"
+			fingers = "3"
+		>
+			<command>xdotool key super+space</command>
+		</gesture>
+		<gesture
+			type = "pointer"
+			motion = "triple_tap"
+			fingers = "3"
+		>
+			<command>xdotool key alt+space</command>
+		</gesture>
+	</application>
+
+	<application name="firefox, subl3, yakuake">
+		<gesture
+			type = "swipe"
+			motion = "down"
+			fingers = "4"
+			description = "Move forward a tab"
+		>
+			<command>xdotool key ctrl+Tab</command>
+		</gesture>
+		<gesture
+			type = "swipe"
+			motion = "up"
+			fingers = "4"
+			description = "Move backward a tab"
+		>
+			<command>xdotool key ctrl+shift+Tab</command>
+		</gesture>
+		<gesture
+			type = "pinch"
+			motion = "clockwise"
+		>
+			<command>xdotool key ctrl+n</command>
+		</gesture>
+		<gesture
+			type = "pinch"
+			motion = "anticlockwise"
+		>
+			<command>xdotool key ctrl+w</command>
+		</gesture>
+	</application>
+	<application name = "yakuake">
+		<gesture
+			type = "pinch"
+			motion = "anticlockwise"
+		>
+			<command>xdotool key ctrl+W</command>
+		</gesture>
+	</application>
+	<application name = "firefox">
+		<gesture 
+			type = "swipe"
+			motion = "left"
+			fingers = "4"
+		>
+			<command>xdotool key alt+Right</command>
+		</gesture>
+		<gesture 
+			type = "swipe"
+			motion = "right"
+			fingers = "4"
+		>
+			<command>xdotool key alt+Left</command>
+		</gesture>
+		<gesture
+			type = "pinch"
+			motion = "clockwise"
+		>
+			<command>xdotool key ctrl+t</command>
+		</gesture>
+	</application>
+	<application name="vlc">
+		<gesture
+			type = "pinch"
+			motion = "clockwise"
+		>
+			<command>xdotool key --clearmodifiers XF86AudioRaiseVolume</command>
+		</gesture>
+		<gesture
+			type = "pinch"
+			motion = "anticlockwise"
+		>
+			<command>xdotool key --clearmodifiers XF86AudioLowerVolume</command>
+		</gesture>
+		<gesture
+			type = "pinch"
+			motion = "out"
+			description = "Toggle fullscreen"
+		>
+			<command>xdotool key f</command>
+		</gesture>
+	</application>
+</libinput>

@@ -130,7 +130,7 @@ user_action() {
 	else
 	    echo "$NAME is not running."
 	fi
-	if [ -f $HCFDIR/$NAME.conf ]; then
+	if [ -f $HCFDIR/$NAME.xml ]; then
 	    echo "$NAME is using custom configuration."
 	else
 	    echo "$NAME is using default configuration."
@@ -155,7 +155,7 @@ if [ $cmd = "install" -o $cmd = "uninstall" ]; then
 	install -CDv -m 755 -t $DESTDIR$BINDIR $NAME
 	install -CDv -m 644 -t $DESTDIR$APPDIR $NAME.desktop
 	install -CDv -m 644 -t $DESTDIR$ICODIR $NAME.png
-	install -CDv -m 644 -t $DESTDIR$CNFDIR $NAME.conf
+	install -CDv -m 644 -t $DESTDIR$CNFDIR $NAME.xml
 	install -CDv -m 644 -t $DESTDIR$DOCDIR README.md
 
 	# Also install HTML file if markdown is available
@@ -166,7 +166,7 @@ if [ $cmd = "install" -o $cmd = "uninstall" ]; then
 	rm -rfv $DESTDIR$BINDIR/$NAME
 	rm -rfv $DESTDIR$APPDIR/$NAME.desktop
 	rm -rfv $DESTDIR$ICODIR/$NAME.png
-	rm -rfv $DESTDIR$CNFDIR/$NAME.conf
+	rm -rfv $DESTDIR$CNFDIR/$NAME.xml
 	rm -rfv $DESTDIR$DOCDIR
 	rm -rfv $DESTDIR$BINDIR/$NAME-setup
     fi
