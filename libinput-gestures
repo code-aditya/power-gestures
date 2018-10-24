@@ -32,7 +32,7 @@ ROTATE_ANGLE = 30.0
 GLOBAL = 'GLOBAL'
 TAP_TIMER = 0.5
 SINGLE_TAP_THRESHOLD = 0.3
-DEFAULT_DEVICES = [('pointer gesture', 'touchpad'), ('keyboard', 'keyboard')]
+DEFAULT_DEVICES = [('touchpad', 'pointer gesture'), ('keyboard', 'keyboard')]
 
 # Set up command line arguments
 opt = argparse.ArgumentParser(description=__doc__)
@@ -121,7 +121,7 @@ def get_devices_list():
                 yield dev
                 dev = {}
 
-def get_device(dev_type, name):
+def get_device(name, **kwargs):
     """Determine libinput touchpad device"""
     devices = list(get_devices_list())
 
@@ -147,10 +147,11 @@ def get_device(dev_type, name):
                 return d
 
     # Otherwise look for 1st device with default types
+    dev_type = kwargs.get('capabilities')
     for d in devices:
-        if any([word in d.get('capabilities') for word in dev_type.split()]) and re.search(name, d.get('device', ''), re.I):
-            if name == 'touchpad':
-                if 'size' in d:
+        if re.search(name, d.get('device', ''), re.I):
+            if dev_type:
+                if any([word in d.get('capabilities') for word in dev_type.split()]):
                     return d
             else:
                 return d
@@ -704,9 +705,9 @@ if args.verbose and not args.raw:
 devices = []
 if isinstance(args.devices, list):
     for dev in args.devices:
-        device = get_device(dev[0], dev[1])
+        device = get_device(dev)
         if not device:
-            sys.exit('Could not determine the device, with device type "{}" and data "{}".'.format(dev[0], dev[1]))
+            sys.exit('Could not determine the device, with device name "{}".'.format(dev))
         if args.verbose:
             print('{}: device {}: {}'.format(PROG, device.get('kernel'), device.get('device')))
         devices.append(device.get('kernel').split('/')[3])
@@ -716,7 +717,7 @@ elif args.devices == 'all':
     devices = None
 else:
     for dev in DEFAULT_DEVICES:
-        device = get_device(dev[0], dev[1])
+        device = get_device(dev[0], capabilities=dev[1])
         if not device:
             continue
         if args.verbose:

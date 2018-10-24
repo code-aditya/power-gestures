@@ -5,7 +5,8 @@
 	can create a personal custom configuration file at "~/.config/libinput-gestures.conf".
 
 	Root tag must be "libinput" and each gesture tag should be nested inside the
-	application tag.
+	application tag. The root tag also supports optional "device" attribute which should be list
+	of device names.
 
 	"name" attribute of "application" tag needs to be a list of commands, where each command
 	is the output of: 'ps -o comm= -q $WINDOW_PID' and seperated by ','. If name
