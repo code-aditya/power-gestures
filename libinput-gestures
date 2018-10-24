@@ -643,13 +643,14 @@ def parse_conf(root):
 def get_conf(conffile, confname):
     """Read given configuration file and store internal actions etc"""
     try:
-        file = open(conffile)
+        file = conffile.open()
         conf = minidom.parse(file)
     except Exception as e:
         print(str(e))
         sys.exit("Couldn't read {}".format(conffile))
     root = conf.documentElement
     errmsg = parse_conf(root)
+    file.close()
     if errmsg:
         sys.exit('Error in file {}:\n-> {}.'.format(confname, errmsg))
 
