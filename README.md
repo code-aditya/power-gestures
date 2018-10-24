@@ -1,3 +1,22 @@
+## DIVERGING UPDATE
+
+This update extends the power of libinput-gestures to make it an all-powerful utility to do anything with just gestures.
+First of all, so as to make it very extensible and powerful, the configuration format is changed to standard XML, and the configuration file is now named `libinput-gestures.xml` (NOT `libinput-gestures.conf`).
+See the example `libinput-gestures.xml` file to understand how to use it.
+
+#### NEW FEATURES:
+- Gestures can be specified for each individual application or for the "GLOBAL" application - that is, that gesture will be used for any application. Gestures for specific application take priority over "GLOBAL" application. The application name is matched against the output of `ps -o comm= -q $WINDOW_PID`, where $WINDOW_PID is the current application's (on-top window) PID. That is, application name here refers to the executable name of the application.
+- New "held_key" and "trigger" attributes added for gesture tag!
+- "held_key" attribute is used to add a condition to choose that gesture only when the specified key-combination is input. Example value: 'leftctrl+x'.
+- "trigger" attribute is used to add a condition to choose that gesture only when the previous detected gesture had been the same as of trigger. Can be used to chain gestures. Example value: 'swipe right'.
+- New "pointer" and "shape" gestures added!
+- Pointer gesture refers to the pointer button (left, middle or right) taps (single, double, triple or quadruple taps). Most useful to combine it with "held_key" or "trigger" attributes.
+- Shape gesture is currently unsupported and is just a placeholder for future implementation of gestures of custom shape, using strokes to construct the shape.
+- New "command" tag is added which denotes one command line. Multiple such "command" tags can be used to create chain of commands to execute on that gesture.
+
+#### PLANNED FEATURES
+- Work on custom shape detection. Also, has to decide on a particular key to be pressed for it, so that it doesn't cause conflict with swipe or pinch gestures.
+
 ### LIBINPUT-GESTURES
 
 [Libinput-gestures][REPO] is a utility which reads libinput gestures

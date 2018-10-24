@@ -31,6 +31,7 @@ ROTATE_ANGLE = 30.0
 GLOBAL = 'GLOBAL'
 TAP_TIMER = 0.5
 SINGLE_TAP_THRESHOLD = 0.3
+DEFAULT_DEVICES = [('pointer gesture', 'touchpad'), ('keyboard', 'keyboard')]
 
 # Set up command line arguments
 opt = argparse.ArgumentParser(description=__doc__)
@@ -47,7 +48,7 @@ opt.add_argument('-l', '--list', action='store_true',
         help='just list out available and configured gestures')
 opt.add_argument('-e', '--env', action='store_true',
         help='just list out environment for diagnostic purposes')
-opt.add_argument('--device',
+opt.add_argument('--devices',
         help='explicit device name to use (or path if starts with /)')
 args = opt.parse_args()
 
@@ -55,7 +56,7 @@ if args.debug or args.raw or args.env:
     args.verbose = True
 
 def open_lock(*args):
-    'Create a lock based on given list of arguments'
+    """Create a lock based on given list of arguments"""
     # We use exclusive assess to a file for this
     fp = Path('/tmp', '-'.join(args) + '.lock').open('w')
     try:
@@ -66,7 +67,7 @@ def open_lock(*args):
     return fp
 
 def run(cmd, check=True, **kwargs):
-    'Run subprocess function and return standard output or None'
+    """Run subprocess function and return standard output or None"""
     # Maintain subprocess compatibility with python 3.4 so use
     # check_output() rather than run().
     try:
@@ -80,7 +81,7 @@ def run(cmd, check=True, **kwargs):
     return stdout
 
 def get_libinput_vers():
-    'Return the libinput installed version number string'
+    """Return the libinput installed version number string"""
     # Try to use newer libinput interface then fall back to old
     # (depreciated) interface.
     res = run(('libinput', '--version'), check=False)
@@ -96,7 +97,7 @@ else:
     cmd_list_devices = 'libinput-list-devices'
 
 def get_devices_list():
-    'Get list of devices and their attributes (as a dict) from libinput'
+    """Get list of devices and their attributes (as a dict) from libinput"""
     stdout = run(cmd_list_devices.split())
     if stdout:
         dev = {}
@@ -109,8 +110,8 @@ def get_devices_list():
                 yield(dev)
                 dev = {}
 
-def get_device(name):
-    'Determine libinput touchpad device'
+def get_device(dev_type, name):
+    """Determine libinput touchpad device"""
     devices = list(get_devices_list())
 
     if not devices:
@@ -133,17 +134,18 @@ def get_device(name):
                     return d
             elif d.get('device') == name:
                 return d
-        return None
 
-    # Otherwise look for 1st device with touchpad capabilities
+    # Otherwise look for 1st device with default types
     for d in devices:
-        if 'size' in d and 'pointer' in d.get('capabilities'):
-            return d
-
-    # Otherwise look for 1st device with touchpad in it's name
-    for d in devices:
-        if re.search(r'touch ?pad', d.get('device', ''), re.I):
-            return d
+        if any([word in d.get('capabilities') for word in dev_type.split()]) and re.search(name, d.get('device', ''), re.I):
+            if name == 'touchpad':
+                if 'size' in d:
+                    return d
+            else:
+                return d
+        if dev_type == 'gesture':
+            if 'size' in d and 'pointer' in d.get('capabilities'):
+                return d
 
     # Give up
     return None
@@ -155,7 +157,7 @@ class COMMAND:
 
     def run(self):
         'Run this command + arguments'
-        run(self.argslist)
+        subprocess.Popen(self.argslist, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def __str__(self):
         'Create string representation'
@@ -233,63 +235,148 @@ class COMMAND_internal(COMMAND):
 # Table of gesture handlers
 handlers = OrderedDict()
 
+# To store last gesture
+last_gesture = None
+
 def add_gesture_handler(cls):
     """Create gesture handler instance and add to lookup table based on name"""
     handlers[cls.__name__] = cls()
 
-class GESTURE:
-    """Abstract base class for handling for gestures"""
+class EVENT:
+    """Abstract base class for handling of input events"""
+    def __init__(self):
+        self.name = type(self).__name__
+
+    def begin(self):
+        pass
+
+    def end(self):
+        pass
+
+    def action(self):
+        pass
+
+    def validate(self, *args, **kwargs):
+        pass
+
+class KEY_PRESS(EVENT):
+    def __init__(self):
+        super(KEY_PRESS, self).__init__()
+        self.button = None
+
+    def begin(self, btn):
+        self.button = btn[4:]
+        if args.verbose:
+            print('{}: {} {} {}'.format(PROG, self.name, self.button, 'pressed'))
+
+    def action(self, gesture):
+        gesture.end()        
+
+    def end(self, gesture=None):
+        if args.verbose:
+            print('{}: {} {} {}'.format(PROG, self.name, self.button, 'released'))
+        if gesture:
+            self.action(gesture)
+
+    def get_key(keys):
+        if not keys:
+            return None
+        return '+'.join([(key.button).lower() for key in keys])
+
+class GESTURE(EVENT):
+    """Abstract base class for handling of gestures"""
+    SUPPORTED_ATTRIBUTES = ['type', 'motion', 'trigger', 'description', 'held_key']
+    REQUIRED_ATTRIBUTES = ['type', 'motion']
+
     def __init__(self):
         """Initialise this gesture at program start"""
-        self.name = type(self).__name__
-        self.motions = OrderedDict()
+        super(GESTURE, self).__init__()
+        self.key = 'motion: {motion}, trigger: {trigger}, held_key: {held_key}'
+        self.motions = dict()
         self.has_extended = False
 
-    def add(self, application, motion, fingers, command):
-        """Add a configured motion command for this gesture"""
+    def validate(self, **kwargs):
+        motion = kwargs.get('motion')
         if motion not in self.SUPPORTED_MOTIONS:
             return 'Gesture {} does not support motion "{}".\n' \
                     'Must be "{}"'.format(self.name.lower(), motion,
                             '" or "'.join(self.SUPPORTED_MOTIONS))
-        if not command:
-            return 'No command configured'
 
+    def add(self, application, commands, **kwargs):
+        """Add a configured motion command for this gesture"""
+        errmsg = self.validate(**kwargs)
+        if errmsg:
+            return errmsg
         # If any extended gestures configured then set flag to enable
         # their discrimination
-        if self.extended_text in motion:
+        if kwargs.get('motion') and self.extended_text in kwargs.get('motion'):
             self.has_extended = True
 
-        key = (application, motion, fingers) if fingers else (application, motion)
-        cmds = shlex.split(command)
-        cls = internal_commands.get(cmds[0], COMMAND)
-        self.motions[key] = cls(cmds)
+        cmds = []
+        for command in commands:
+            cmd = shlex.split(command)
+            cls = internal_commands.get(cmd[0], COMMAND)
+            cmds.append(cls(cmd))
+        desc = kwargs.pop('description')
+        kwargs.pop('type')
+        key = self.key.format(**kwargs)
+        self.motions.setdefault(application, OrderedDict())[key] = cmds
         if args.verbose:
-            print(key, ':', self.motions[key])
-        return None
+            print(self.name, '=>', key, '=>', [str(cmd) for cmd in self.motions[application][key]])
 
-    def begin(self, fingers):
+    def begin(self, *args, **kwargs):
         """Initialise this gesture at the start of motion"""
-        self.fingers = fingers
         self.data = [0.0, 0.0]
 
     def action(self, motion):
         """Action a motion command for this gesture"""
-        current_application = run('ps --no-header -o comm -q $(xdotool getactivewindow getwindowpid)', check=False, shell=True).strip()
-        command = self.motions.get((current_application, motion, self.fingers)) or \
-                self.motions.get((current_application, motion))
+        global last_gesture
+        global key_handlers
+        current_application = run('ps -o comm= -q $(xdotool getactivewindow getwindowpid)', check=False, shell=True).strip()
 
-        if not command:
-            command = self.motions.get((GLOBAL, motion, self.fingers)) or \
-                self.motions.get((GLOBAL, motion))
+        held_keys = KEY_PRESS.get_key(key_handlers)
+
+        for application in (current_application, GLOBAL):
+            values = self.motions.get(application)
+            if values:
+                keys = self.get_key(motion, last_gesture, held_keys)
+                for key in keys:
+                    commands = values.get(key)
+                    if commands:
+                        break
+                else:
+                    continue
+                break
 
         if args.verbose:
-            print('{}: {} {} {} {}'.format(PROG, self.name, motion,
-                self.fingers, self.data))
-            if command:
-                print('  ', command)
+            print('{}: {}'.format(PROG, self.get_data(motion=motion, trigger=held_keys, last=last_gesture)))
 
-        if command and not args.debug:
-            command.run()
+        last_gesture = '{} {}'.format(self.name.lower(), motion)
+
+        if commands:
+            for command in commands:
+                if args.verbose:
+                    print('-> ', command)
+                if not args.debug:
+                    command.run()
+
+    def get_key(self, motion, last_gesture, held_keys, **kwargs):
+        keys = list()
+        for trigger in (last_gesture, None):
+            for held_key in (held_keys, None):
+                extra = {
+                    'motion': motion,
+                    'trigger': trigger,
+                    'held_key': held_key,
+                }
+                fmt = {**extra, **kwargs}
+                keys.append(self.key.format(**fmt))
+        return keys
+
+    def get_data(self, *args, **kwargs):
+        return '{} {} (held: {}) (last: {})'.format(
+            self.name, kwargs['motion'], kwargs['trigger'], kwargs['last'])
+
 
 @add_gesture_handler
 class SWIPE(GESTURE):
@@ -298,10 +385,27 @@ class SWIPE(GESTURE):
             'left_up', 'right_up', 'left_down', 'right_down')
     extended_text = '_'
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.key = self.key + ', fingers: {fingers}'
+        self.SUPPORTED_ATTRIBUTES = self.SUPPORTED_ATTRIBUTES + ['fingers']
+
+    def begin(self, fingers):
+        super().begin()
+        self.fingers = fingers
+
     def update(self, coords):
         """Update this gesture for a motion"""
         self.data[0] += float(coords[2])
         self.data[1] += float(coords[3])
+
+    def validate(self, **kwargs):
+        errmsg = super().validate(**kwargs)
+        if errmsg:
+            return errmsg
+        fingers = kwargs.get('fingers')
+        if fingers and not (fingers.isdigit() and int(fingers) < 5):
+            return 'fingers should be a digit and less than 5'
 
     def end(self):
         """Action this gesture at the end of a motion sequence"""
@@ -327,11 +431,24 @@ class SWIPE(GESTURE):
 
         self.action(motion)
 
+    def get_key(self, *args, **kwargs):
+        keys = list()
+        for fingers in (self.fingers, None):
+            kwargs['fingers'] = fingers
+            keys.extend(super().get_key(*args, **kwargs))
+        return keys
+
+    def get_data(self, *args, **kwargs):
+        return super().get_data(*args, **kwargs) + ' (fingers: {})'.format(self.fingers)
+
 @add_gesture_handler
 class PINCH(GESTURE):
     """Class to handle this type of gesture"""
     SUPPORTED_MOTIONS = ('in', 'out', 'clockwise', 'anticlockwise')
     extended_text = 'clock'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def update(self, coords):
         """Update this gesture for a motion"""
@@ -358,9 +475,23 @@ class POINTER(GESTURE):
         4: 'quadruple'
     }
 
-    def begin(self, fingers, time, clicks=1):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.key = self.key + ', button: {button}'
+        self.SUPPORTED_ATTRIBUTES = self.SUPPORTED_ATTRIBUTES + ['button']
+        self.REQUIRED_ATTRIBUTES = self.REQUIRED_ATTRIBUTES + ['button']
+
+    def validate(self, **kwargs):
+        errmsg = super().validate(**kwargs)
+        if errmsg:
+            return errmsg
+        btn = kwargs.get('button')
+        if btn not in ('left', 'middle', 'right'):
+            return 'button should be one of LEFT, MIDDLE or RIGHT.'
+
+    def begin(self, button, time, clicks=1):
         """Initialise this gesture at the start of motion"""
-        self.fingers = fingers
+        self.button = button
         self.data = [float(time[1:-1]), 0.0]
         self.done = False
         self.clicks = clicks
@@ -381,9 +512,33 @@ class POINTER(GESTURE):
         if self.clicks == 1:
             motion = 'tap'
         else:
-            motion = self.prefix[self.clicks] + '_tap'
-        self.action(motion)
+            try:
+                motion = self.prefix[self.clicks] + '_tap'
+            except KeyError:
+                print('Unsupported number of taps: {}'.format(self.clicks))
+                return
+        self.action(motion)        
 
+    def get_key(self, *args, **kwargs):
+        kwargs['button'] = self.button
+        return super().get_key(*args, **kwargs)
+
+    def get_data(self, *args, **kwargs):
+        return super().get_data(*args, **kwargs) + ' (button: {})'.format(self.button)
+
+@add_gesture_handler
+class SHAPE(GESTURE):
+    SUPPORTED_MOTIONS = ()
+    extended_text = ''
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.key = self.key + ''
+        self.SUPPORTED_ATTRIBUTES = self.SUPPORTED_ATTRIBUTES + ['strokes']
+        self.REQUIRED_ATTRIBUTES = ['type', 'strokes', 'held_key']
+
+    def validate(self, **kwargs):
+        strokes = kwargs.get('strokes')
 
 # Table of configuration commands
 conf_commands = OrderedDict()
@@ -398,31 +553,40 @@ def conf_gesture(application, gestures):
     for gesture in gestures:
         if not gesture.hasAttribute('type'):
             return '"type" attribute should be specified for the "gesture" tag.'
-        if not gesture.hasAttribute('motion'):
-            return '"motion" attribute should be specified for the "gesture" tag.'
         gtype = gesture.getAttribute('type')
         handler = handlers.get(gtype.upper(), None)
         if not handler:
             return 'Gesture "{}" is not supported.\nMust be "{}"'.format(
                 gtype, '" or "'.join([h.lower() for h in handlers])) 
-        motion = gesture.getAttribute('motion')
-        fingers = gesture.getAttribute('fingers')
-        if not (fingers.isdigit() and int(fingers) <= 5):
-            fingers = None
+        kwargs = dict()
+        for attr in handler.SUPPORTED_ATTRIBUTES:
+            if not gesture.hasAttribute(attr) and attr in handler.REQUIRED_ATTRIBUTES:
+                return 'Gesture "{}" requires "{}" attribute to be specified.'.format(
+                    gtype, attr)
+            kwargs[attr] = gesture.getAttribute(attr).lower() if gesture.hasAttribute(attr) else None
         commands = gesture.getElementsByTagName('command')
-        for command in commands:
-            errmsg = handler.add(application, motion.lower(), fingers, command.childNodes[0].data)
-            if errmsg:
-                return errmsg
+        if not commands:
+            return 'No command configured for the given gesture'
+        cmds = [command.childNodes[0].data for command in commands]
+        errmsg = handler.add(application, cmds, **kwargs)
+
+        if errmsg:
+            return errmsg
 
 @add_conf_command
 def conf_device(application, devices):
     """Process the first device tag found in conf file"""
     # Command line overrides configuration file
-    if not args.device and devices:
-        args.device = devices[0].childNodes[0].data
+    if not args.devices and devices:
+        for device in devices:
+            data = device.childNodes[0].data
+            device_type = device.getAttribute('type')
+            if data == 'all' and not device_type:
+                args.devices = 'all'
+                break
+            args.devices.append((device_type, data))
 
-    return None #if args.device else 'No device specified'
+    return None# if args.devices else 'No device specified'
 
 def get_app_conf(application, app_name):
     """Process app-related conf in conf file"""
@@ -438,8 +602,11 @@ def get_conf(conffile, confname):
         file = open(conffile)
         conf = minidom.parse(file)
     except Exception as e:
+        print(str(e))
         sys.exit("Couldn't read {}".format(conffile))
     root = conf.documentElement
+    if root.tagName != 'libinput':
+        sys.exit('Error in file {}:\n-> Root tag must be "libinput".'.format(confname))
     applications = root.getElementsByTagName('application')
     for application in applications:
         if application.hasAttribute('name'):
@@ -450,7 +617,7 @@ def get_conf(conffile, confname):
         for app in app_names:
             errmsg = get_app_conf(application, app)
             if errmsg:
-                sys.exit('Error in file {}:\n{}.'.format(confname, errmsg))
+                sys.exit('Error in file {}:\n-> {}.'.format(confname, errmsg))
 
 def unexpanduser(cfile):
     """Return absolute path name, with $HOME replaced by ~"""
@@ -495,124 +662,136 @@ if args.verbose:
     print('{}: using {} with {} gestures'.format(PROG,
         confname, sum([len(h.motions) for h in handlers.values()])))
 
-# Just list out available gestures if that is asked for
-if args.list:
-    print('Gestures configured in {}:'.format(confname))
-    for h in handlers.values():
-        for mpair, cmd in h.motions.items():
-            motion, fingers = (mpair, '') if isinstance(mpair, str) else mpair
-            print('{} {:10}{:>2} {}'.format(h.name.lower(), motion,
-                fingers, cmd))
-    sys.exit()
-
-# Get touchpad device
-if not args.device or args.device.lower() != "all":
-    device = get_device(args.device)
-    if not device:
-        sys.exit('Could not determine touchpad device.')
-else:
-    device = None
-
-if args.verbose:
-    if device:
-        print('{}: device {}: {}'.format(PROG, device.get('kernel'),
-            device.get('device')))
-    else:
-        print('{}: monitoring all devices'.format(PROG))
-
-# If just called to list out above environment info then exit now
-if args.env:
-    sys.exit()
-
 # Make sure only one instance running for current user
 user = getpass.getuser()
 proglock = open_lock(PROG, user)
 if not proglock:
-    sys.exit('{} is already running for {}, terminating ..'.format(PROG, user))
+    pass#sys.exit('{} is already running for {}, terminating...'.format(PROG, user))
 
-# Note your must "sudo gpasswd -a $USER input" then log out/in for
+# Just list out available gestures if that is asked for
+if args.list:
+    print('Gestures configured in {}:'.format(confname))
+    for h in handlers.values():
+        for mpair, cmds in h.motions.items():
+            app, held_key, trigger, motion, fingers = mpair
+            print('{}: (key={}, trigger={}) {} {} {} -> {}'.format(app, held_key, trigger, h.name.lower(), motion,
+                fingers, [str(cmd) for cmd in cmds]))
+    sys.exit()
+
+# Get devices to monitor
+devices = []
+if isinstance(args.devices,list):
+    for dev in args.devices:
+        device = get_device(dev[0], dev[1])
+        if not device:
+            sys.exit('Could not determine the device, with device type "{}" and data "{}".'.format(dev[0], dev[1]))
+        if args.verbose:
+            print('{}: device {}: {}'.format(PROG, device.get('kernel'), device.get('device')))
+        devices.append(device.get('kernel').split('/')[3])
+elif args.devices == 'all':
+    if args.verbose:
+        print('{}: monitoring all devices'.format(PROG))
+    devices = None
+else:
+    for dev in DEFAULT_DEVICES:
+        device = get_device(dev[0], dev[1])
+        if not device:
+            continue
+        if args.verbose:
+            print('{}: device {}: {}'.format(PROG, device.get('kernel'), device.get('device')))
+        devices.append(device.get('kernel').split('/')[3])
+# If just called to list out above environment info then exit now
+if args.env:
+    sys.exit()
+
+# Note user must use "sudo gpasswd -a $USER input" then log out/in for
 # permission to access the device.
-devstr = ' --device {}'.format(device.get('kernel')) if device else ''
-options = ' --enable-tap --set-tap-map lrm'
-command = 'stdbuf -oL -- {}{}{}'.format(cmd_debug_events, options, devstr)
-
-cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,
-        bufsize=0, universal_newlines=True)
+options = ' --show-keycodes --enable-tap --set-tap-map lrm'
+command = 'stdbuf -oL -- {}{}'.format(cmd_debug_events, options)
+process = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE, universal_newlines=True, bufsize=1)
 
 # Sit in a loop forever reading the libinput messages ..
 handler = None
 prev_handler = None
-for line in cmd.stdout:
-
+key_handlers = []
+for line in iter(process.stdout.readline, ''):
+    # Split received message line into relevant fields
+    dev, event, time, btn, *argslist = line[1:].strip().split(maxsplit=4)
     # Just output raw messages if in that mode
+    if devices and not dev in devices:
+        continue
     if args.raw:
         print(line.strip())
         continue
 
-    # Only interested in pointer buttons
-    if 'POINTER_BUTTON' in line:
-        dev, pevent, time, btn, other = line.strip().split(maxsplit=4)
-        key = btn[4:]
-        fingers = {
-            'LEFT': "1",
-            'RIGHT': "2",
-            'MIDDLE': "3"
-        }[key]
-        if 'released' in other and handler:
+    # Only interested in pointer button events
+    if 'POINTER_BUTTON' == event:
+        mouse_btn = btn[4:].lower()
+        if 'released' in ''.join(argslist) and handler:
             handler.update(time)
             prev_handler = handler
             handler = None
         elif prev_handler and not prev_handler.done:
-            if prev_handler.fingers == fingers:
+            if prev_handler.button == mouse_btn:
                 handler = prev_handler
                 handler.timer.cancel()
                 handler.update(time)
                 handler.click()
-                handler.begin(fingers, time, handler.clicks)
+                handler.begin(mouse_btn, time, handler.clicks)
                 prev_handler = None
             else:
                 prev_handler.timer.cancel()
                 prev_handler.end()
                 prev_handler = None
         else:
-            handler = handlers.get('POINTER', None)
-            if handler:
-                handler.begin(fingers, time)
-            else:
-                print('Unknown pointer event received: {}.'.format(gesture),
-                        file=sys.stderr)
+            handler = handlers.get('POINTER')
+            handler.begin(mouse_btn, time)
     elif prev_handler and not prev_handler.done:
         prev_handler.timer.cancel()
         prev_handler.end()
         prev_handler = None
 
-    if 'GESTURE_' not in line:
-        continue
+    # Only interested in pointer motion events
+    if 'POINTER_MOTION' == event and key_handlers:
+        pass
 
-    # Split received message line into relevant fields
-    dev, gevent, time, other = line.strip().split(maxsplit=3)
-    gesture, event = gevent[8:].split('_')
-    fingers, *argslist = other.split(maxsplit=1)
-    params = argslist[0] if argslist else ''
-
-    # Action each type of event
-    if event == 'UPDATE':
-        if handler:
-            # Split parameters into list of clean numbers
-            handler.update(re.split(r'[^-.\d]+', params))
-    elif event == 'BEGIN':
-        handler = handlers.get(gesture)
-        if handler:
-            handler.begin(fingers)
+    # Only interested in keyboard events
+    if 'KEYBOARD_KEY' == event:
+        state = argslist[0].split()[1]
+        if state == 'pressed':
+            key_handler = KEY_PRESS()
+            key_handler.begin(btn)
+            key_handlers.append(key_handler)
+        elif state == 'released':
+            key_handler = key_handlers.pop()
+            key_handler.end(handler)
         else:
-            print('Unknown gesture received: {}.'.format(gesture),
-                    file=sys.stderr)
-    elif event == 'END':
-        # Ignore gesture if final action is cancelled
-        if handler:
-            if params != 'cancelled':
-                handler.end()
-            handler = None
-    else:
-        print('Unknown gesture + event received: {} + {}.'.format(gesture,
-            event), file=sys.stderr)
+            print('Unknown key state recieved: {}'.format(state), file=sys.stderr)
+
+    # Only interested in gesture events.
+    if 'GESTURE_' in event:
+        gesture, event = event[8:].split('_')
+        fingers = btn
+        params = argslist[0] if argslist else ''
+
+        # Action each type of event
+        if event == 'UPDATE':
+            if handler:
+                # Split parameters into list of clean numbers
+                handler.update(re.split(r'[^-.\d]+', params))
+        elif event == 'BEGIN':
+            handler = handlers.get(gesture)
+            if handler:
+                handler.begin(fingers)
+            else:
+                print('Unknown gesture received: {}.'.format(gesture),
+                        file=sys.stderr)
+        elif event == 'END':
+            # Ignore gesture if final action is cancelled
+            if handler:
+                if params != 'cancelled':
+                    handler.end()
+                handler = None
+        else:
+            print('Unknown gesture + event received: {} + {}.'.format(gesture,
+                event), file=sys.stderr)

@@ -1,34 +1,44 @@
-<!-- 
-# Configuration file for libinput-gestures.
-#
-# The default configuration file exists at /etc/libinput-gestures.conf
-# but a user can create a personal custom configuration file at
-# ~/.config/libinput-gestures.conf.
-#
-# Currently "application", "gesture", "command" and "device" configuration tags are supported as
-# described below.
-# Each gesture tag has 2-4 attributes:
-#
-# type, motion, [fingers] and [description]
-#
-# where type and motion is either:
-#     swipe up|down|left|right|left_up|right_up|left_down|right_down
-#     pinch in|out|clockwise|anticlockwise
-#	  pointer tap|double_tap|triple_tap|quadruple_tap
-#
-# command is the child tag of the gesture and is any valid shell command + arguments.
-#
-# fingers is a single numeric digit and is optional (and is
-# typically 3 or 4). If specified then the command is executed when
-# exactly that number of fingers is used in the gesture. If not
-# specified then the command is executed when that gesture is executed
-# with any number of fingers. Gesture lines specified with finger_count
-# have priority over the same gesture specified without any
-# finger_count.
-#
-# Typically command will be xdotool, or wmctrl. See "man xdotool" for
-# the many things you can action with that tool. Note that unfortunately
-# xdotool does not work with native Wayland clients.
+<!--
+	Configuration file for libinput-gestures.
+
+	The default configuration file exists at "/etc/libinput-gestures.conf", but a user
+	can create a personal custom configuration file at "~/.config/libinput-gestures.conf".
+
+	Root tag must be "libinput" and each gesture tag should be nested inside the
+	application tag.
+
+	"name" attribute of "application" tag needs to be a list of commands, where each command
+	is the output of: 'ps -o comm= -q $WINDOW_PID' and seperated by ','. If name
+	attribute is missing, then that application tag refers to the global application, that is
+	the gestures and devices are configured for all applications.
+
+	A "gesture" tag denotes the basic unit of event, which the libinput script will sense from the
+	configured devices, usually touchpad. Since the keyboard gestures are easily configured using
+	most Desktop managers, libinput-gestures internally handles the keypress events to avoid conflicts.
+	The "gesture" tag currently supports following attributes:
+	1. * "type": One of 'swipe', 'pointer', 'pinch', 'shape'
+	2. * "motion": Depends on "type"...
+			- "swipe": 'left', 'right', 'up', 'down', 'left_up', 'right_up', 'left_down', 'right_down'
+			- "pointer": 'tap', 'double_tap', 'triple_tap', 'quadruple_tap'
+			- "pinch": 'in', 'out', 'clockwise', 'anticlockwise'
+	3. "trigger": A string, representing the last-executed gesture event in the form of
+			'{type} {motion} {fingers}', to ensure that this gesture executes in the chain of previous
+			gesture.
+	4. "held_key": A required key press to execute this gesture.
+	5. "description": Just a nice way to provide descriptive information to the configured gesture.
+
+	6. "fingers": [Only for 'swipe' type] A digit, less than 5, denoting the required number of fingers to be used
+			for this gesture.
+	7. "button": [Only for 'pointer' type] One of 'LEFT', 'MIDDLE' or 'RIGHT'.
+
+	Note that "type" and "motion" are required attributes and define the type of gesture to detect,
+	whereas "fingers", "trigger" and "held_key" define the specific condition for this particular gesture
+	to be selected.
+	
+	"gesture" tag also needs to have nested "command" tags, whose values are just plain
+	shell commands to execute when the gesture is detected and are executed in order of their listing.
+	Typically command will be xdotool, or wmctrl. See "man xdotool" for the many things you can do with that tool.
+	Note that unfortunately xdotool does not work with native Wayland clients.
 -->
 
 <libinput>
@@ -79,20 +89,28 @@
 		<gesture
 			type = "pointer"
 			motion = "double_tap"
-			fingers = "3"
+			button = "left"
+			held_key = "leftctrl"
 		>
 			<command>xdotool key super+space</command>
 		</gesture>
 		<gesture
 			type = "pointer"
 			motion = "triple_tap"
-			fingers = "3"
+			button = "middle"
 		>
 			<command>xdotool key alt+space</command>
 		</gesture>
+		<gesture
+			type = "shape"
+			held_key = "leftalt"
+			strokes = ""
+		>
+			<command>echo echo</command>
+		</gesture>
 	</application>
 
-	<application name="firefox, subl3, yakuake">
+	<application name="firefox, subl3, yakuake, electron">
 		<gesture
 			type = "swipe"
 			motion = "down"
